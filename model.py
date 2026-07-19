@@ -1163,50 +1163,230 @@ def collect_model_parameters_into_list(encoder_layer_params, decoder_layer_param
             info.append(value)
     return info
 
-# Step 56 - shift_targets_right_with_start_token (not yet solved)
-# TODO: implement
+# Step 56 - shift_targets_right_with_start_token
+def shift_targets_right_with_start_token(target_ids, start_token_id):
+    # TODO: prepend start_token_id and drop the last column so output shape matches target_ids
+    new_shifted = torch.empty_like(target_ids)
+    new_shifted[:,1:] = target_ids[:,:-1]
+    new_shifted[:,0] = start_token_id 
+    return new_shifted
 
-# Step 57 - compute_noam_learning_rate (not yet solved)
-# TODO: implement
+# Step 57 - compute_noam_learning_rate
+def compute_noam_learning_rate(step, d_model, warmup_steps):
+    # TODO: return the Noam warmup learning rate for the given step.
+    lr = d_model**(-0.5) * min(step**(-0.5),step*(warmup_steps**(-1.5)))
+    return lr
 
-# Step 58 - build_uniform_smoothing_distribution (not yet solved)
-# TODO: implement
+# Step 58 - build_uniform_smoothing_distribution
+import torch
 
-# Step 59 - set_confidence_on_gold_tokens (not yet solved)
-# TODO: implement
+def build_uniform_smoothing_distribution(shape, vocab_size, epsilon):
+    # TODO: return a float tensor of `shape` filled with epsilon / (vocab_size - 2).
+    value = epsilon / (vocab_size - 2)
+    tensor = torch.ones(shape,dtype=torch.float32)
+    tensor = tensor * value
+    return tensor
 
-# Step 60 - zero_pad_column_and_pad_token_rows (not yet solved)
-# TODO: implement
+# Step 59 - set_confidence_on_gold_tokens
+import torch
 
-# Step 61 - compute_label_smoothed_kl_loss (not yet solved)
-# TODO: implement
+def set_confidence_on_gold_tokens(smoothed_distribution, gold_token_ids, confidence):
+    """Place confidence mass at gold-token positions of a smoothed target distribution."""
+    # TODO: write the confidence value at each gold token id along the vocab axis
+    smooth_tensor = smoothed_distribution.clone()
+    gold = gold_token_ids.unsqueeze(-1)
+    smooth_tensor = smooth_tensor.scatter_(
+        2,gold,confidence
+    )
+    return smooth_tensor
 
-# Step 62 - average_loss_over_non_pad_tokens (not yet solved)
-# TODO: implement
+# Step 60 - zero_pad_column_and_pad_token_rows
+import torch
 
-# Step 63 - compute_token_accuracy_ignoring_pad (not yet solved)
-# TODO: implement
+def zero_pad_column_and_pad_token_rows(smoothed_distribution, gold_token_ids, pad_id):
+    # TODO: zero the pad column and the rows where the gold token equals pad_id
+    result = smoothed_distribution.clone()
+    result[:,:,pad_id] = 0 
 
-# Step 64 - initialize_adam_optimizer_state (not yet solved)
-# TODO: implement
+    mask = (gold_token_ids == pad_id)
 
-# Step 65 - update_adam_first_moment (not yet solved)
-# TODO: implement
+    result[mask] = 0 
+    return result
 
-# Step 66 - update_adam_second_moment (not yet solved)
-# TODO: implement
+# Step 61 - compute_label_smoothed_kl_loss
+import torch
 
-# Step 67 - apply_adam_bias_correction (not yet solved)
-# TODO: implement
+def compute_label_smoothed_kl_loss(log_probabilities, smoothed_distribution):
+    """Return the summed KL loss over all (batch, time, vocab) entries."""
+    # TODO: combine log_probabilities with the smoothed target distribution into a scalar loss
+    loss = log_probabilities * smoothed_distribution 
+    loss = - torch.sum(loss)
+    if loss == 0:
+        loss = loss.abs()
+    return loss
 
-# Step 69 - apply_adam_step_to_all_parameters (not yet solved)
-# TODO: implement
+# Step 62 - average_loss_over_non_pad_tokens
+import torch
 
-# Step 70 - zero_all_parameter_gradients (not yet solved)
-# TODO: implement
+def average_loss_over_non_pad_tokens(total_loss, gold_token_ids, pad_id):
+    # TODO: divide total_loss by the count of non-pad tokens in gold_token_ids
+    mask = (gold_token_ids == pad_id)
+    counts = torch.sum(~mask).item()
+    return total_loss / max(counts,1)
 
-# Step 71 - compute_batch_training_loss (not yet solved)
-# TODO: implement
+# Step 63 - compute_token_accuracy_ignoring_pad
+import torch
+
+def compute_token_accuracy_ignoring_pad(log_probabilities, gold_token_ids, pad_id):
+    # TODO: argmax over vocab, compare to gold, average over non-pad positions only
+    argmaxed = torch.argmax(log_probabilities,dim=2)
+    mask = (gold_token_ids!=pad_id)
+    counts = mask.sum()
+    correct = ((argmaxed==gold_token_ids)&mask).sum()
+    return correct / max(1,counts)
+
+# Step 64 - initialize_adam_optimizer_state
+import torch
+
+def initialize_adam_optimizer_state(parameter_list):
+    """Allocate Adam m, v zero buffers and a step counter t=0."""
+    # TODO: allocate zero buffers for first and second moments, plus step counter
+    t = 0
+    m = [torch.zeros_like(p,requires_grad=False) for p in parameter_list]
+    v = [torch.zeros_like(p,requires_grad=False) for p in parameter_list]
+    return {
+        'm':m,
+        'v':v,
+        't':t
+    }
+
+# Step 65 - update_adam_first_moment
+import torch
+
+def update_adam_first_moment(m_prev, grad, beta1):
+    """Return m_t = beta1 * m_prev + (1 - beta1) * grad."""
+    # TODO: apply the Adam first-moment EMA update and return the new tensor
+    return beta1 * m_prev + (1- beta1) * grad
+
+# Step 66 - update_adam_second_moment
+import torch
+
+def update_adam_second_moment(v_prev, grad, beta2):
+    """Return v_t = beta2 * v_prev + (1 - beta2) * grad ** 2."""
+    # TODO: apply Adam's EMA update for the second moment of the gradient
+    return beta2 * v_prev + (1 - beta2) * grad **2
+
+# Step 67 - apply_adam_bias_correction
+import torch
+
+def apply_adam_bias_correction(m_t, v_t, beta1, beta2, step):
+    """Return bias-corrected (m_hat, v_hat) for Adam at the given step."""
+    # TODO: divide each moment by (1 - beta**step) using its respective beta
+    mhat = m_t/ (1 - beta1**step)
+    vhat = v_t / (1 - beta2**step)
+    return (mhat,vhat)
+
+# Step 69 - apply_adam_step_to_all_parameters
+import torch
+
+def update_adam_first_moment(m_prev, grad, beta1):
+    """Return m_t = beta1 * m_prev + (1 - beta1) * grad."""
+    # TODO: apply the Adam first-moment EMA update and return the new tensor
+    return beta1 * m_prev + (1- beta1) * grad
+
+def update_adam_second_moment(v_prev, grad, beta2):
+    """Return v_t = beta2 * v_prev + (1 - beta2) * grad ** 2."""
+    # TODO: apply Adam's EMA update for the second moment of the gradient
+    return beta2 * v_prev + (1 - beta2) * grad **2
+
+def apply_adam_bias_correction(m_t, v_t, beta1, beta2, step):
+    """Return bias-corrected (m_hat, v_hat) for Adam at the given step."""
+    # TODO: divide each moment by (1 - beta**step) using its respective beta
+    mhat = m_t/ (1 - beta1**step)
+    vhat = v_t / (1 - beta2**step)
+    return (mhat,vhat)
+
+
+def apply_adam_step_to_all_parameters(parameter_list, optimizer_state, learning_rate, beta1=0.9, beta2=0.98, epsilon=1e-9):
+    # TODO: increment t, then for each param with a grad update m, v, bias-correct, and subtract delta in place.
+  
+    optimizer_state['t'] += 1
+    with torch.no_grad():
+        for i , param in enumerate(parameter_list):
+            if param.grad is None:
+                continue
+            
+            grad = param.grad 
+            m = update_adam_first_moment(
+                optimizer_state['m'][i],grad,beta1
+            )
+            optimizer_state['m'][i] = m
+            v = update_adam_second_moment(
+                optimizer_state['v'][i],grad,beta2
+            )
+            optimizer_state['v'][i] = v
+            m_h,v_h = apply_adam_bias_correction(m,v,beta1,beta2,optimizer_state['t'])
+            param -= learning_rate * m_h / (torch.sqrt(v_h)+epsilon)
+        
+    return optimizer_state
+
+# Step 70 - zero_all_parameter_gradients
+import torch
+
+def zero_all_parameter_gradients(parameter_list):
+    """Clear the .grad of every parameter tensor before the next backward pass."""
+    # TODO: clear the accumulated gradient on every parameter tensor in the list
+    for i, param in enumerate(parameter_list):
+        if param is None:
+            continue
+        param.grad = None
+
+# Step 71 - compute_batch_training_loss
+def shift_targets_right_with_start_token(target_ids, start_token_id):
+    # TODO: prepend start_token_id and drop the last column so output shape matches target_ids
+    new_shifted = torch.empty_like(target_ids)
+    new_shifted[:,1:] = target_ids[:,:-1]
+    new_shifted[:,0] = start_token_id 
+    return new_shifted
+
+def build_uniform_smoothing_distribution(shape, vocab_size, epsilon):
+    # TODO: return a float tensor of `shape` filled with epsilon / (vocab_size - 2).
+    value = epsilon / (vocab_size - 2)
+    tensor = torch.ones(shape,dtype=torch.float32)
+    tensor = tensor * value
+    return tensor
+
+def compute_label_smoothed_kl_loss(log_probabilities, smoothed_distribution):
+    """Return the summed KL loss over all (batch, time, vocab) entries."""
+    # TODO: combine log_probabilities with the smoothed target distribution into a scalar loss
+    loss = log_probabilities * smoothed_distribution 
+    loss = - torch.sum(loss)
+    if loss == 0:
+        loss = loss.abs()
+    return loss 
+
+def average_loss_over_non_pad_tokens(total_loss, gold_token_ids, pad_id):
+    # TODO: divide total_loss by the count of non-pad tokens in gold_token_ids
+    mask = (gold_token_ids == pad_id)
+    counts = torch.sum(~mask).item()
+    return total_loss / max(counts,1)
+
+def compute_batch_training_loss(src_batch, tgt_batch, model_params, config):
+    # TODO: shift targets right, run the forward pass, build smoothed targets, and average the KL loss over non-pad tokens.
+    pad_id = config['pad_id']
+    start_id = config['start_id']
+    vocab_size = config['vocab_size']
+    smoothing = config['smoothing']
+    num_heads = config['num_heads']
+    tgt_shifted = shift_targets_right_with_start_token(
+        tgt_batch,start_id
+    )
+    tf_op = run_transformer_forward(src_batch, 
+                tgt_shifted, model_params, num_heads, pad_id)
+    sm_tgt = build_uniform_smoothing_distribution(tf_op,vocab_size,1e-6)
+    total_loss = compute_label_smoothed_kl_loss(tf_op,sm_tgt)
+    avg_loss = average_loss_over_non_pad_tokens(total_loss,sm_tgt,pad_id)
+    return avg_loss
 
 # Step 72 - run_training_step_with_backprop (not yet solved)
 # TODO: implement
